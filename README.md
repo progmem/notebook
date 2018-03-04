@@ -1,6 +1,6 @@
 # Engineering Notebook
 
-This script creates a topic within the enginneering notebook that I use on a day-to-day basis. Topics are laid out in the following structure:
+This script creates a topic within the engineering notebook that I use on a day-to-day basis. Topics are laid out in the following structure:
 
 ```
 topic_name/

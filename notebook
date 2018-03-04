@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+usage() {
+	cat <<EOF
+Engineering Notebook
+Scaffolds the necessary structure for taking notes related to one or more specified topic.
+
+The Directory structure for topics is created in NOTE_PATH.
+If NOTE_PATH is not set, defaults to the current working directory.
+
+Once scaffolded, the topic will be opened in NOTE_EDITOR.
+If NOTE_EDITOR is not set, defaults to VISUAL, then EDITOR, then vi.
+
+Usage: $(basename "$0") <flags> <topic>
+	One or more topics can be specified.
+	If no flags are specified, opens the last <topic> declared.
+
+Flags:
+  -e|--editor <exec>
+    Uses <exec> instead of NOTE_EDITOR.
+  -m|--multi-open
+    If more than one <topic> is declared, attempt to open them all in the same editor instance.
+    Useful for editors like Sublime Text, which can accept multiple folders when coupled with -p.
+  -n|--note-path <path>
+    Creates each <topic> in <path> instead of the current NOTE_PATH.
+  -p|--open-path
+    Opens the folder for each <topic>, instead of the README.md.
+    Useful for editors like Sublime Text, which can accept multiple folders when coupled with -m.
+  -t|--tmux
+    If currently in a tmux session, opens a new tmux window for each topic.
+
+Inspired by @dankleiman and his scaffolding process:
+	https://github.com/dankleiman/notebook
+EOF
+}
+
+# NOTE_EDITOR, which is the command to run for your editor.
+# Will choose from one of the following environment variables.
+# * NOTE_EDITOR, if it's set
+# * VISUAL
+# * EDITOR
+# If, by some miracle none of these are set, we'll default to vi.
+# Can be overridden with a flag.
+NOTE_EDITOR=${NOTE_EDITOR}
+NOTE_EDITOR=${NOTE_EDITOR:-${VISUAL}}
+NOTE_EDITOR=${NOTE_EDITOR:-${EDITOR}}
+NOTE_EDITOR=${NOTE_EDITOR:-vi}
+# NOTE_PATH, which is where notes will be stored.
+# Defaults to the current working directory.
+# Can be overridden with a flag.
+NOTE_PATH=${NOTE_PATH:-.}
+
+# Location of all positional parameters.
+NOTE_POSITIONAL=()
+
+
+### POSITIONAL PARSIING
+if [[ $# -eq 0 ]]; then
+	usage
+	exit 1
+else while [[ $# -gt 0 ]]; do
+  # Assume that a passed parameter is a key.
+  key="$1"
+  case $key in
+    # Override which editor to use.
+    -e|--editor)
+      NOTE_EDITOR="$2"
+      shift
+      shift
+      ;;
+    # Try to open multiple files/directories in a single editor instance.
+    # Useful for Sublime Text and other editors that support a list of files.
+    -m|--multi-open)
+      NOTE_MULTIOPEN=1
+      shift
+      ;;
+    # Override where notes should go
+    -n|--note-path)
+      NOTE_PATH="$2"
+      shift
+      shift
+      ;;
+		# Opens the folder in your editor of choice, instead of the README.md.
+    -p|--open-path)
+      NOTE_OPENPATH=1
+      shift
+      ;;
+    # Enables tmux support.
+    # This will open the editor in a new tmux window, if you are currently attached to a tmux session.
+    # This option ignores NOTE_MULTIOPEN.
+    -t|--tmux)
+			if ! [ -z "$TMUX" ]; then
+				# We check the list of tmux panes for our current TTY.
+				# We'll keep only the second value from it, which is the current session.
+				# We'll use this to spawn new windows in the current session.
+				NOTE_TMUX=$(grep "$(tty)" <(tmux list-panes -a -F '#{pane_tty} #{session_name}' 2>/dev/null) | awk '{print $2}')
+			fi
+      shift
+      ;;
+    # Any other switches will display the usage.
+    -*)
+    	usage
+    	exit 1
+    	;;
+    *) # Section to be created
+      NOTE_POSITIONAL+=("$1")
+      shift
+      ;;
+  esac
+done; fi
+# Restore the remaining positional parameters
+set -- "${NOTE_POSITIONAL[@]}"
+
+
+### MAIN INTERATION
+# For every section name passed...
+for i in "${NOTE_POSITIONAL[@]}"; do
+	# Clean up the section name, replacing chunks of spaces with dashes.
+  section=`echo "${i,,}" | tr -s ' ' '_'`
+  if [ -d "$NOTE_PATH/$section" ]; then
+  	# Section already exists, don't do anything.
+    echo "Section already exists: $section"
+  else
+  	# Section does not exist.
+    echo "  Creating new section: $section"
+    # Create three core folders and a README.md:
+    # * Data,  where supporting data would go
+    # * Code,  which could be scripts, prototypes, code to replicate an issue, etc.
+    # * Notes, where any notes taken for a given topic should go.
+    
+		# Think of the README.md file as what you would present to someone, populating it with:
+		# * A high-level overview of the topic
+		# * If a bug/issue/exploit, steps taken to investigate, replicate, etc.
+		# * If an enhancement, information about existing implementations
+		# * If a solution is being proposed, detail it here.
+    mkdir -p "$NOTE_PATH/$section/data"      &>/dev/null
+    mkdir -p "$NOTE_PATH/$section/code"      &>/dev/null
+    mkdir -p "$NOTE_PATH/$section/notes"     &>/dev/null
+    touch    "$NOTE_PATH/$section/README.md" &>/dev/null
+  fi  
+done
+
+# If tmux integration was requested, we'll open a new tmux window in the current session.
+# Each requested section gets its own window in tmux.
+if ! [ -z "$NOTE_TMUX" ]; then for i in "${NOTE_POSITIONAL[@]}"; do 	
+	# If path opening was requested, we'll open the folder in our editor of choice.
+	if [[ $NOTE_OPENPATH -eq 1 ]]; then
+		tmux new-window -n "Notebook - $section" "cd $NOTE_PATH/$section && $NOTE_EDITOR ."
+  # Otherwise, open the README.md.
+  else
+  	tmux new-window -n "Notebook - $section" "cd $NOTE_PATH/$section && $NOTE_EDITOR README.md"
+	fi
+done
+# Otherwise, check if NOTE_MULTIOPEN is set.
+# If it is, we'll attempt to open all topics in the same editor.
+elif [[ $NOTE_MULTIOPEN -eq 1 ]]; then
+	# We'll echo out the path to each section, then paste them together.
+	NOTE_MULTIOPEN=$(for i in "${NOTE_POSITIONAL[@]}"; do
+		section=`echo "${i,,}" | tr -s ' ' '_'`
+		# If we're opening paths, then echo the path to each section.
+		if [[ $NOTE_OPENPATH -eq 1 ]]; then
+			echo "$section"
+		# Otherwise, echo the path to each section's README.md
+		else
+			echo "$section/README.md"
+		fi
+	done | paste -s -d' ' - )
+
+	# We pop into our notes directory, then open our paths in it.
+	cd "$NOTE_PATH"
+	$NOTE_EDITOR $NOTE_MULTIOPEN
+	# We'll change back to the previous directory once done.
+	cd -
+# Otherwise, open up the last section created.
+else
+	cd ${NOTE_PATH}/${section} &>/dev/null
+	if [[ $NOTE_OPENPATH -eq 1 ]]; then
+		${NOTE_EDITOR} .
+  else
+    ${NOTE_EDITOR} README.md
+	fi
+	# We'll jump back to the previous working directory once done.
+	cd - &>/dev/null
+fi

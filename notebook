@@ -11,8 +11,8 @@ Once scaffolded, the topic will be opened in NOTE_EDITOR.
 If NOTE_EDITOR is not set, defaults to VISUAL, then EDITOR, then vi.
 
 Usage: $(basename "$0") <flags> <topic>
-	One or more topics can be specified.
-	If no flags are specified, opens the last <topic> declared.
+  One or more topics can be specified.
+  If no flags are specified, opens the last <topic> declared.
 
 Flags:
   -e|--editor <exec>
